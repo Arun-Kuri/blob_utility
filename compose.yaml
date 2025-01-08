@@ -1,0 +1,16 @@
+services:
+  blob_utility:
+    build:
+      context: .
+      dockerfile: dockerfile
+    image: blob_util:v_01
+    container_name: blob_utility
+    volumes:
+      - hostPath:containerPath:ro
+    networks:
+      - net
+  
+networks:
+  net:
+    driver: bridge
+    external: true
