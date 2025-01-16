@@ -1,64 +1,85 @@
 import os
 import json
 import asyncio
+import tracemalloc
 from dotenv import load_dotenv
 from azure.storage.blob import BlobServiceClient
 from azure.iot.device import IoTHubModuleClient
 from azure.core.exceptions import ResourceExistsError
 
-#load_dotenv("/config/config.env")
-CAM_ID = "cam-02" # os.environ.get("CAMERA_NAME")
-#BLOB_MODULE = "192.168.29.245"
-BLOB_MODULE = "storage_module"
-STORAGE_ACCOUNT_NAME = "edgestore"
-STORAGE_ACCOUNT_KEY = "7Cyf5F4Arlo96IKsm+eWsw=="
-CONNECTION_STRING = f"DefaultEndpointsProtocol=http;BlobEndpoint=http://{BLOB_MODULE}:11002/{STORAGE_ACCOUNT_NAME};AccountName={STORAGE_ACCOUNT_NAME};AccountKey={STORAGE_ACCOUNT_KEY};"
-print(f"Connecting to Edge blob account {STORAGE_ACCOUNT_NAME} with {CONNECTION_STRING}")
+# Enable tracemalloc for better debugging
+tracemalloc.start()
+
+# Configuration
+CAM_ID = os.environ.get("CAMERA_NAME", "cam-03")
+BLOB_MODULE = os.environ.get("BLOB_MODULE", "storage_module")
+PORT = os.environ.get("BLOB_PORT", "11002")
+STORAGE_ACCOUNT_NAME = os.environ.get("STORAGE_ACCOUNT_NAME", "storagetest")
+STORAGE_ACCOUNT_KEY = os.environ.get("STORAGE_ACCOUNT_KEY", "IQBD8T64wryoM0T5Rt4Fyw==")
 INPUT_FOLDER = "/store"
+
+# Construct connection string
+CONNECTION_STRING = (
+    f"DefaultEndpointsProtocol=http;"
+    f"BlobEndpoint=http://{BLOB_MODULE}:{PORT}/{STORAGE_ACCOUNT_NAME};"
+    f"AccountName={STORAGE_ACCOUNT_NAME};"
+    f"AccountKey={STORAGE_ACCOUNT_KEY};"
+)
+
+print(f"Connecting to Edge blob account {STORAGE_ACCOUNT_NAME}")
+
+# Initialize blob service client
 try:
-    blob_service_client = BlobServiceClient.from_connection_string(CONNECTION_STRING, api_version="2019-12-12")
+    blob_service_client = BlobServiceClient.from_connection_string(
+        CONNECTION_STRING, 
+        api_version="2019-12-12"
+    )
     print("Blob service client created")
 except Exception as e:
     print(f"Blob service client creation error: {e}")
+    raise
 
-# Create a unique name for the container
+# Container names
 image_container_name = f"{CAM_ID}-imagestore"
 video_container_name = f"{CAM_ID}-videostore"
 
-try:
-    # Create image container
-    container_client = blob_service_client.create_container(image_container_name)
-    print(f"Container {image_container_name} created")
-except ResourceExistsError:
-    print(f"A container with name {image_container_name} already exists")
-    pass
+# Create containers if they don't exist
+def setup_containers():
+    try:
+        # Create image container
+        blob_service_client.create_container(image_container_name)
+        print(f"Container {image_container_name} created")
+    except ResourceExistsError:
+        print(f"Container {image_container_name} already exists")
+    except Exception as e:
+        print(f"Error creating image container: {e}")
+        raise
 
-try:
-    # Create video container
-    container_client = blob_service_client.create_container(video_container_name)
-    print(f"Container {video_container_name} created")
-except ResourceExistsError:
-    print(f"A container with name {video_container_name} already exists")
-    pass 
+    try:
+        # Create video container
+        blob_service_client.create_container(video_container_name)
+        print(f"Container {video_container_name} created")
+    except ResourceExistsError:
+        print(f"Container {video_container_name} already exists")
+    except Exception as e:
+        print(f"Error creating video container: {e}")
+        raise
 
-async def handle_message(message):
+def message_handler(message):
+    """Synchronous handler for IoT Hub messages"""
     try:
         message_text = message.data.decode("utf-8")
         message_json = json.loads(message_text)
-        print(message_json)
+        print(f"Received message: {message_json}")
+        
         if message.input_name == "image_blob_trigger":
             file_name = message_json["alert_image"]
-            alert_id = message_json["alert_id"],
+            alert_id = message_json["alert_id"]
             frame_id = message_json["frame_id"]
             cam_id = message_json["cam_id"]
             alert_day = message_json["alert_day"]
             blob_name = f"{alert_id}-{cam_id}-{alert_day}-{frame_id}.jpg"
-
-            try:
-                # Create a blob client using the local file name as the name for the blob
-                blob_client = blob_service_client.get_blob_client(container=image_container_name, blob=blob_name)
-            except Exception as e:
-                print(f"Blob client creations error: {e}")
+            container_name = image_container_name
 
         elif message.input_name == "video_blob_trigger":
             file_name = message_json["alert_video"]
@@ -66,42 +87,71 @@ async def handle_message(message):
             cam_id = message_json["cam_id"]
             alert_day = message_json["alert_day"]
             blob_name = f"{alert_id}-{cam_id}-{alert_day}.avi"
-            
-            try:
-                # Create a blob client using the local file name as the name for the blob
-                blob_client = blob_service_client.get_blob_client(container=video_container_name, blob=blob_name)
-            except Exception as e:
-                print(f"Blob client creations error: {e}")
-
+            container_name = video_container_name
         else:
-            print("Unknown Input Stream")
+            print(f"Unknown Input Stream: {message.input_name}")
+            return
 
-        # Upload the created file
-        if file_name:
-            print(f"Uploading to Azure Cloud Storage as blob: {file_name}")
-            with open(file=file_name, mode="rb") as data:
-                await blob_client.upload_blob(data, overwrite=True)
-                print(f"{file_name} added to container")
+        # Create a blob client and upload the file
+        try:
+            blob_client = blob_service_client.get_blob_client(
+                container=container_name, 
+                blob=blob_name
+            )
+
+            if file_name and os.path.exists(file_name):
+                print(f"Uploading to Azure Cloud Storage as blob: {blob_name}")
+                with open(file=file_name, mode="rb") as data:
+                    blob_client.upload_blob(data, overwrite=True)
+                print(f"Successfully uploaded {file_name} as {blob_name}")
+            else:
+                print(f"File not found: {file_name}")
+
+        except Exception as e:
+            print(f"Error uploading blob: {e}")
+            raise
 
     except Exception as e:
-        print(f"Error processing input message: {e}")
+        print(f"Error processing message: {e}")
+        # Log the error but don't raise to keep the handler running
+        return
 
 async def main():
-
-
-    #connection_string = "HostName=WaterUtilityHub.azure-devices.net;DeviceId=dot-edge-vision2;SharedAccessKey=BYNmMKdeQUscnzAFRHPciWX1A1I7cfGHcNRW3zBvDfw="
+    """Main application loop"""
+    # Set up containers first
+    setup_containers()
+    
+    # Initialize IoT Hub client
     try:
         module_client = IoTHubModuleClient.create_from_edge_environment()
-        #module_client = IoTHubModuleClient.create_from_connection_string(connection_string)
         module_client.connect()
+        print("IoT Hub module client connected")
     except Exception as e:
-        print(f"Module Connection Error: {e}")
+        print(f"Error connecting to IoT Hub: {e}")
+        return
 
-    module_client.on_message_received = handle_message
+    try:
+        # Register message handler
+        module_client.on_message_received = message_handler
+        print("Message handler registered")
 
-    while True:
-        await asyncio.sleep(100)
+        # Keep the application running
+        while True:
+            await asyncio.sleep(60)  # Health check every minute
+            print("Module running - waiting for messages...")
 
+    except Exception as e:
+        print(f"Unexpected error in main loop: {e}")
+    finally:
+        # Clean up resources
+        print("Shutting down...")
+        await module_client.disconnect()
+        await blob_service_client.close()
 
-if __name__=="__main__":
-    asyncio.run(main())
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("Application stopped by user")
+    except Exception as e:
+        print(f"Fatal error: {e}")
