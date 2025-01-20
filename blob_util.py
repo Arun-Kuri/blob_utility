@@ -14,8 +14,8 @@ tracemalloc.start()
 CAM_ID = os.environ.get("CAMERA_NAME", "cam-03")
 BLOB_MODULE = os.environ.get("BLOB_MODULE", "storage_module")
 PORT = os.environ.get("BLOB_PORT", "11002")
-STORAGE_ACCOUNT_NAME = os.environ.get("STORAGE_ACCOUNT_NAME", "storagetest")
-STORAGE_ACCOUNT_KEY = os.environ.get("STORAGE_ACCOUNT_KEY", "IQBD8T64wryoM0T5Rt4Fyw==")
+STORAGE_ACCOUNT_NAME = os.environ.get("STORAGE_ACCOUNT_NAME", "edgestore")
+STORAGE_ACCOUNT_KEY = os.environ.get("STORAGE_ACCOUNT_KEY", "7Cyf5F4Arlo96IKsm+eWsw==")
 INPUT_FOLDER = "/store"
 
 # Construct connection string
@@ -37,7 +37,7 @@ try:
     print("Blob service client created")
 except Exception as e:
     print(f"Blob service client creation error: {e}")
-    raise
+    #raise
 
 # Container names
 image_container_name = f"{CAM_ID}-imagestore"
@@ -53,7 +53,7 @@ def setup_containers():
         print(f"Container {image_container_name} already exists")
     except Exception as e:
         print(f"Error creating image container: {e}")
-        raise
+        pass
 
     try:
         # Create video container
@@ -63,7 +63,7 @@ def setup_containers():
         print(f"Container {video_container_name} already exists")
     except Exception as e:
         print(f"Error creating video container: {e}")
-        raise
+        pass
 
 def message_handler(message):
     """Synchronous handler for IoT Hub messages"""
@@ -100,16 +100,17 @@ def message_handler(message):
             )
 
             if file_name and os.path.exists(file_name):
-                print(f"Uploading to Azure Cloud Storage as blob: {blob_name}")
+                print(f"Uploading to Storage container as blob: {blob_name}")
                 with open(file=file_name, mode="rb") as data:
                     blob_client.upload_blob(data, overwrite=True)
                 print(f"Successfully uploaded {file_name} as {blob_name}")
+                print(f"Blob Properties: {blob_client.get_blob_properties()}")
             else:
                 print(f"File not found: {file_name}")
 
         except Exception as e:
             print(f"Error uploading blob: {e}")
-            raise
+            pass
 
     except Exception as e:
         print(f"Error processing message: {e}")
@@ -155,3 +156,4 @@ if __name__ == "__main__":
         print("Application stopped by user")
     except Exception as e:
         print(f"Fatal error: {e}")
+        raise
