@@ -1,3 +1,5 @@
-azure.identity
-azure.storage.blob
-azure.iot.device
+#azure.identity
+azure.core==1.32.0
+azure.storage.blob==12.24.0
+azure.iot.device==2.14.0
+python-dotenv==1.0.1
